@@ -201,16 +201,14 @@ show_header() {
     if is_syn_fix_installed; then
         if is_our_syn_fix_installed; then
             local label="Установлен (наш)"
-            local color="${GREEN}"
         else
-            local label="Установлен (иной вариант SYN Limit)"
-            local color="${YELLOW}"
+            local label="Установлен иной вариант SYN Limit)"
         fi
         local port_info=$(get_saved_port)
         if [ -n "$port_info" ]; then
-            echo -e "  ${BOLD}SYN FIX:${NC} ${color}${label}${NC} (порт $port_info)"
+            echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}${label}${NC} (порт $port_info)"
         else
-            echo -e "  ${BOLD}SYN FIX:${NC} ${color}${label}${NC}"
+            echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}${label}${NC}"
         fi
     else
         echo -e "  ${BOLD}SYN FIX:${NC} ${DIM}Не установлен${NC}"
@@ -271,10 +269,10 @@ main_menu() {
                 echo ""
                 if is_syn_fix_installed; then
                     log_info "Обнаружены правила с tcp и syn. Удалить их все?"
-                    echo -en "  ${BOLD}Удалить? [Y/n]:${NC} "
+                    echo -en "  ${BOLD}Удалить? [y/N]:${NC} "
                     local confirm
                     read -r confirm
-                    if [[ -z "$confirm" || "$confirm" =~ ^[yY]$ ]]; then
+                    if [[ "$confirm" =~ ^[yY]$ ]]; then
                         remove_syn_fix
                     else
                         log_info "Отмена удаления"
