@@ -45,21 +45,29 @@ install_syn_fix() {
 
     ufw --force enable
 
-    # Добавляем наши правила в /etc/ufw/before.rules (если их там ещё нет)
-    if ! grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
-        # Создаём резервную копию
+    # Проверяем, есть ли уже наши правила в before.rules
+    if grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
+        log_info "Наши правила уже присутствуют в before.rules"
+    else
+        # Создаём бэкап
         cp /etc/ufw/before.rules /etc/ufw/before.rules.bak.$(date +%s)
-        
-        # Вставляем наши правила перед строкой COMMIT
-        sed -i '/^COMMIT$/ i\
+        # Пытаемся вставить перед COMMIT
+        sed -i '/COMMIT/ i\
 # MTProxy SYN FIX by MEKO (mtpr_syn_fix)\n\
 -A ufw-before-input -p tcp --dport 443 --syn -m hashlimit --hashlimit-name mtproto_443 --hashlimit-mode srcip --hashlimit-upto 54/minute --hashlimit-burst 1 --hashlimit-htable-expire 60000 --hashlimit-htable-size 32768 -m comment --comment "mtpr_syn_fix" -j ACCEPT\n\
 -A ufw-before-input -p tcp --dport 443 --syn -j REJECT --reject-with tcp-reset' /etc/ufw/before.rules
-    else
-        log_info "Правила уже присутствуют в before.rules"
+
+        # Проверяем, добавились ли
+        if ! grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
+            # Если не добавились (COMMIT не найден), добавляем в конец файла
+            log_info "COMMIT не найден, добавляем правила в конец before.rules"
+            echo -e "\n# MTProxy SYN FIX by MEKO (mtpr_syn_fix)" >> /etc/ufw/before.rules
+            echo '-A ufw-before-input -p tcp --dport 443 --syn -m hashlimit --hashlimit-name mtproto_443 --hashlimit-mode srcip --hashlimit-upto 54/minute --hashlimit-burst 1 --hashlimit-htable-expire 60000 --hashlimit-htable-size 32768 -m comment --comment "mtpr_syn_fix" -j ACCEPT' >> /etc/ufw/before.rules
+            echo '-A ufw-before-input -p tcp --dport 443 --syn -j REJECT --reject-with tcp-reset' >> /etc/ufw/before.rules
+        fi
     fi
 
-    # Перезагружаем ufw, чтобы применить изменения из файла
+    # Перезагружаем ufw, чтобы применить изменения
     ufw reload
 
     log_success "SYN FIX успешно установлен"
@@ -72,9 +80,9 @@ remove_syn_fix() {
     if grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
         # Создаём бэкап
         cp /etc/ufw/before.rules /etc/ufw/before.rules.bak.$(date +%s)
-        # Удаляем наши строки (включая комментарий)
+        # Удаляем блок от комментария до строки с REJECT (включая обе строки)
         sed -i '/# MTProxy SYN FIX by MEKO (mtpr_syn_fix)/,/^-A ufw-before-input -p tcp --dport 443 --syn -j REJECT --reject-with tcp-reset/d' /etc/ufw/before.rules
-        # Также удаляем пустые строки, оставшиеся после удаления
+        # Удаляем пустые строки, оставшиеся после удаления
         sed -i '/^$/d' /etc/ufw/before.rules
     else
         log_info "Наши правила не найдены в before.rules"
