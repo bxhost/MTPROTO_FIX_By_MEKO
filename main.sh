@@ -1,6 +1,7 @@
 #!/bin/bash
 # Простой менеджер SYN FIX
 # Меню: 1) Install/Remove SYN FIX, 2) Optimization, 0) Exit
+# Запуск: сохраните как /usr/local/bin/mekopr и дайте права на выполнение (chmod +x)
 
 set -eo pipefail
 
@@ -9,6 +10,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
@@ -41,22 +43,6 @@ save_port() {
     echo "$1" > "$PORT_FILE"
 }
 
-# ── Удаление всех наших строк из .rules файлов ──────────────
-clean_our_rules_from_files() {
-    find /etc/ufw/ -name '*.rules' -type f | while read -r file; do
-        if grep -q 'mtpr_syn_fix' "$file"; then
-            cp "$file" "$file.bak.$(date +%s)"
-            # Удаляем строки с комментарием и сами правила (содержащие mtpr_syn_fix)
-            sed -i '/mtpr_syn_fix/d' "$file"
-            # Также удаляем строку с комментарием (если осталась)
-            sed -i '/# MTProxy SYN FIX by MEKO/d' "$file"
-            # Удаляем пустые строки
-            sed -i '/^$/d' "$file"
-            log_info "Очищен файл: $file"
-        fi
-    done
-}
-
 # ── ПРОВЕРКА НАЛИЧИЯ ЛЮБОГО ПРАВИЛА С tcp И syn ────────────
 is_syn_fix_installed() {
     if iptables-save 2>/dev/null | grep -iE 'tcp.*syn|syn.*tcp' | grep -q .; then
@@ -68,7 +54,7 @@ is_syn_fix_installed() {
     return 1
 }
 
-# ── ПРОВЕРКА НАЛИЧИЯ НАШИХ ПРАВИЛ (по комментарию) ─────────
+# ── ПРОВЕРКА, ЧТО СТОИТ ИМЕННО НАШ SYN FIX (mtpr_syn_fix) ──
 is_our_syn_fix_installed() {
     if iptables-save 2>/dev/null | grep -q 'mtpr_syn_fix'; then
         return 0
@@ -130,22 +116,22 @@ install_syn_fix() {
 
     ufw --force enable
 
-    # Удаляем все старые наши строки из файлов, чтобы не было дубликатов
-    clean_our_rules_from_files
-
-    # Добавляем наши правила в /etc/ufw/before.rules
-    cp /etc/ufw/before.rules /etc/ufw/before.rules.bak.$(date +%s)
-    sed -i "/COMMIT/ i\
+    # Добавляем наши правила в /etc/ufw/before.rules (если их там ещё нет)
+    if ! grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
+        cp /etc/ufw/before.rules /etc/ufw/before.rules.bak.$(date +%s)
+        sed -i "/COMMIT/ i\
 # MTProxy SYN FIX by MEKO (mtpr_syn_fix)\n\
 -A ufw-before-input -p tcp --dport $port --syn -m hashlimit --hashlimit-name mtproto_$port --hashlimit-mode srcip --hashlimit-upto 54/minute --hashlimit-burst 1 --hashlimit-htable-expire 60000 --hashlimit-htable-size 32768 -m comment --comment \"mtpr_syn_fix\" -j ACCEPT\n\
 -A ufw-before-input -p tcp --dport $port --syn -j REJECT --reject-with tcp-reset" /etc/ufw/before.rules
 
-    # Если COMMIT не найден, добавляем в конец
-    if ! grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
-        log_info "COMMIT не найден, добавляем в конец before.rules"
-        echo -e "\n# MTProxy SYN FIX by MEKO (mtpr_syn_fix)" >> /etc/ufw/before.rules
-        echo "-A ufw-before-input -p tcp --dport $port --syn -m hashlimit --hashlimit-name mtproto_$port --hashlimit-mode srcip --hashlimit-upto 54/minute --hashlimit-burst 1 --hashlimit-htable-expire 60000 --hashlimit-htable-size 32768 -m comment --comment \"mtpr_syn_fix\" -j ACCEPT" >> /etc/ufw/before.rules
-        echo "-A ufw-before-input -p tcp --dport $port --syn -j REJECT --reject-with tcp-reset" >> /etc/ufw/before.rules
+        if ! grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
+            log_info "COMMIT не найден, добавляем в конец before.rules"
+            echo -e "\n# MTProxy SYN FIX by MEKO (mtpr_syn_fix)" >> /etc/ufw/before.rules
+            echo "-A ufw-before-input -p tcp --dport $port --syn -m hashlimit --hashlimit-name mtproto_$port --hashlimit-mode srcip --hashlimit-upto 54/minute --hashlimit-burst 1 --hashlimit-htable-expire 60000 --hashlimit-htable-size 32768 -m comment --comment \"mtpr_syn_fix\" -j ACCEPT" >> /etc/ufw/before.rules
+            echo "-A ufw-before-input -p tcp --dport $port --syn -j REJECT --reject-with tcp-reset" >> /etc/ufw/before.rules
+        fi
+    else
+        log_info "Наши правила уже есть в before.rules"
     fi
 
     save_port "$port"
@@ -171,8 +157,16 @@ remove_syn_fix() {
         iptables -D ufw-before-input "$num" 2>/dev/null && log_info "Удалено правило #$num из iptables"
     done
 
-    # 2. Удаляем все наши строки из файлов
-    clean_our_rules_from_files
+    # 2. Удаляем строки с tcp и syn из всех .rules файлов в /etc/ufw/
+    find /etc/ufw/ -name '*.rules' -type f | while read -r file; do
+        if grep -qiE 'tcp.*syn|syn.*tcp' "$file"; then
+            cp "$file" "$file.bak.$(date +%s)"
+            sed -i '/tcp.*syn/d' "$file"
+            sed -i '/syn.*tcp/d' "$file"
+            sed -i '/^$/d' "$file"
+            log_info "Очищен файл: $file"
+        fi
+    done
 
     ufw reload
     rm -f "$PORT_FILE"
@@ -197,24 +191,24 @@ show_header() {
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
-    # ── Статус SYN FIX ──────────────────────────────────────
+    # Определяем статус SYN FIX
     if is_syn_fix_installed; then
         if is_our_syn_fix_installed; then
-            local label="Установлен (наш)"
+            local port_info=$(get_saved_port)
+            if [ -n "$port_info" ]; then
+                echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен (MEKO)${NC} (порт $port_info)"
+            else
+                echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен (MEKO)${NC}"
+            fi
         else
-            local label="Установлен иной вариант SYN Limit)"
-        fi
-        local port_info=$(get_saved_port)
-        if [ -n "$port_info" ]; then
-            echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}${label}${NC} (порт $port_info)"
-        else
-            echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}${label}${NC}"
+            # Любой другой SYN фикс (не наш)
+            echo -e "  ${BOLD}SYN FIX:${NC} ${YELLOW}Установлен (ДРУГОЙ SYN)${NC}"
         fi
     else
-        echo -e "  ${BOLD}SYN FIX:${NC} ${DIM}Не установлен${NC}"
+        echo -e "  ${BOLD}SYN FIX:${NC} ${RED}Не установлен${NC}"
     fi
 
-    # ── Статус Telemt ────────────────────────────────────────
+    # Telemt — теперь с цветом: зелёным если установлен, красным если нет
     if pgrep -x telemt >/dev/null 2>&1; then
         local port_info=""
         local configs=(
@@ -269,10 +263,11 @@ main_menu() {
                 echo ""
                 if is_syn_fix_installed; then
                     log_info "Обнаружены правила с tcp и syn. Удалить их все?"
-                    echo -en "  ${BOLD}Удалить? [y/N]:${NC} "
+                    echo -en "  ${BOLD}Удалить? [Y/n]:${NC} "
                     local confirm
                     read -r confirm
-                    if [[ "$confirm" =~ ^[yY]$ ]]; then
+                    # Пустой ввод (Enter) считается как Yes
+                    if [[ -z "$confirm" || "$confirm" =~ ^[yY]$ ]]; then
                         remove_syn_fix
                     else
                         log_info "Отмена удаления"
