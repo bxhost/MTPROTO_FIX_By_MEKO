@@ -9,6 +9,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
@@ -200,15 +201,13 @@ show_header() {
     # ── Статус SYN FIX ──────────────────────────────────────
     if is_syn_fix_installed; then
         if is_our_syn_fix_installed; then
-            local label="Установлен (наш)"
+            echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен (наш)${NC}"
         else
-            local label="Установлен иной вариант SYN Limit)"
+            echo -e "  ${BOLD}SYN FIX:${NC} ${YELLOW}Установлен иной вариант (SYN Limit)${NC}"
         fi
         local port_info=$(get_saved_port)
         if [ -n "$port_info" ]; then
-            echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}${label}${NC} (порт $port_info)"
-        else
-            echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}${label}${NC}"
+            echo -e "    ${DIM}Порт: $port_info${NC}"
         fi
     else
         echo -e "  ${BOLD}SYN FIX:${NC} ${DIM}Не установлен${NC}"
@@ -269,10 +268,11 @@ main_menu() {
                 echo ""
                 if is_syn_fix_installed; then
                     log_info "Обнаружены правила с tcp и syn. Удалить их все?"
-                    echo -en "  ${BOLD}Удалить? [y/N]:${NC} "
+                    echo -en "  ${BOLD}Удалить? [Y/n]:${NC} "
                     local confirm
                     read -r confirm
-                    if [[ "$confirm" =~ ^[yY]$ ]]; then
+                    # Если пустой ввод или y/Y - считаем как yes
+                    if [ -z "$confirm" ] || [[ "$confirm" =~ ^[yY]$ ]]; then
                         remove_syn_fix
                     else
                         log_info "Отмена удаления"
