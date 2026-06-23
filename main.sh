@@ -1,13 +1,7 @@
-Ниже мой полный код, дай мне его обратно, но подправь:
-1. если установлен любой другой SYN, а не наш - то в меню так и должно отображаться что установлен ДРУГОЙ SYN
-Если установлен наш - так и выводить что наш син фикс установлен ну типо не писать там наш не наш а корректно эт прописать чтобы понимание у человека было стоит другой фикс любой другой или наш. 
-2. также команда для запуска меню должна быть не mtpr теперь, а mekopr
-3. БОЛЕЕ НИЧЕГО ВООБЩЕ В КОДЕ НЕ ТРОГАЙ НЕ МЕНЯЙ НЕ РЕДАКТИРУЙ И ТД ВСЕ ОСТАЛЬНОЕ ПРЯМ ВСЕ ОСТАВЬ КАК ЕСТЬ.
-
-код:
 #!/bin/bash
 # Простой менеджер SYN FIX
 # Меню: 1) Install/Remove SYN FIX, 2) Optimization, 0) Exit
+# Запуск: сохраните как /usr/local/bin/mekopr и дайте права на выполнение (chmod +x)
 
 set -eo pipefail
 
@@ -16,6 +10,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
@@ -49,14 +44,22 @@ save_port() {
 }
 
 # ── ПРОВЕРКА НАЛИЧИЯ ЛЮБОГО ПРАВИЛА С tcp И syn ────────────
-# Ищем ВСЕ правила, где есть "tcp" и "syn" (регистр не важен)
 is_syn_fix_installed() {
-    # Проверяем в iptables
     if iptables-save 2>/dev/null | grep -iE 'tcp.*syn|syn.*tcp' | grep -q .; then
         return 0
     fi
-    # Проверяем во всех .rules файлах в /etc/ufw/
     if grep -rE 'tcp.*syn|syn.*tcp' /etc/ufw/ --include='*.rules' 2>/dev/null | grep -q .; then
+        return 0
+    fi
+    return 1
+}
+
+# ── ПРОВЕРКА, ЧТО СТОИТ ИМЕННО НАШ SYN FIX (mtpr_syn_fix) ──
+is_our_syn_fix_installed() {
+    if iptables-save 2>/dev/null | grep -q 'mtpr_syn_fix'; then
+        return 0
+    fi
+    if grep -r 'mtpr_syn_fix' /etc/ufw/ --include='*.rules' 2>/dev/null | grep -q .; then
         return 0
     fi
     return 1
@@ -188,19 +191,24 @@ show_header() {
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
-    # ВАЖНО: ПРОВЕРКА ПРЯМО ЗДЕСЬ, ПЕРЕД ВЫВОДОМ СТАТУСА
+    # Определяем статус SYN FIX
     if is_syn_fix_installed; then
-        local port_info=$(get_saved_port)
-        if [ -n "$port_info" ]; then
-            echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен${NC} (порт $port_info)"
+        if is_our_syn_fix_installed; then
+            local port_info=$(get_saved_port)
+            if [ -n "$port_info" ]; then
+                echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен (MEKO)${NC} (порт $port_info)"
+            else
+                echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен (MEKO)${NC}"
+            fi
         else
-            echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен${NC}"
+            # Любой другой SYN фикс (не наш)
+            echo -e "  ${BOLD}SYN FIX:${NC} ${YELLOW}Установлен (сторонний)${NC}"
         fi
     else
-        echo -e "  ${BOLD}SYN FIX:${NC} ${DIM}Не Установлен${NC}"
+        echo -e "  ${BOLD}SYN FIX:${NC} ${RED}Не установлен${NC}"
     fi
 
-    # Telemt — теперь с цветом: зелёным если Установлен, красным если нет
+    # Telemt — теперь с цветом: зелёным если установлен, красным если нет
     if pgrep -x telemt >/dev/null 2>&1; then
         local port_info=""
         local configs=(
@@ -234,9 +242,6 @@ show_header() {
 # ── Главное меню ─────────────────────────────────────────────
 main_menu() {
     while true; do
-        # ПЕРЕД КАЖДЫМ ВЫВОДОМ МЕНЮ ВЫЗЫВАЕТСЯ show_header()
-        # А ВНУТРИ show_header() ВЫЗЫВАЕТСЯ is_syn_fix_installed()
-        # ТО ЕСТЬ ПРОВЕРКА ВСЕГДА ПЕРЕД ВЫВОДОМ
         show_header
 
         if is_syn_fix_installed; then
@@ -258,10 +263,11 @@ main_menu() {
                 echo ""
                 if is_syn_fix_installed; then
                     log_info "Обнаружены правила с tcp и syn. Удалить их все?"
-                    echo -en "  ${BOLD}Удалить? [y/N]:${NC} "
+                    echo -en "  ${BOLD}Удалить? [Y/n]:${NC} "
                     local confirm
                     read -r confirm
-                    if [[ "$confirm" =~ ^[yY]$ ]]; then
+                    # Пустой ввод (Enter) считается как Yes
+                    if [[ -z "$confirm" || "$confirm" =~ ^[yY]$ ]]; then
                         remove_syn_fix
                     else
                         log_info "Отмена удаления"
