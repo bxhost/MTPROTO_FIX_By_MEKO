@@ -46,8 +46,11 @@ clean_our_rules_from_files() {
     find /etc/ufw/ -name '*.rules' -type f | while read -r file; do
         if grep -q 'mtpr_syn_fix' "$file"; then
             cp "$file" "$file.bak.$(date +%s)"
+            # Удаляем строки с комментарием и сами правила (содержащие mtpr_syn_fix)
             sed -i '/mtpr_syn_fix/d' "$file"
+            # Также удаляем строку с комментарием (если осталась)
             sed -i '/# MTProxy SYN FIX by MEKO/d' "$file"
+            # Удаляем пустые строки
             sed -i '/^$/d' "$file"
             log_info "Очищен файл: $file"
         fi
@@ -56,11 +59,9 @@ clean_our_rules_from_files() {
 
 # ── ПРОВЕРКА НАЛИЧИЯ ЛЮБОГО ПРАВИЛА С tcp И syn ────────────
 is_syn_fix_installed() {
-    # Проверяем в iptables (ищем tcp и syn в одной строке)
     if iptables-save 2>/dev/null | grep -iE 'tcp.*syn|syn.*tcp' | grep -q .; then
         return 0
     fi
-    # Проверяем во всех .rules файлах в /etc/ufw/
     if grep -rE 'tcp.*syn|syn.*tcp' /etc/ufw/ --include='*.rules' 2>/dev/null | grep -q .; then
         return 0
     fi
@@ -139,6 +140,7 @@ install_syn_fix() {
 -A ufw-before-input -p tcp --dport $port --syn -m hashlimit --hashlimit-name mtproto_$port --hashlimit-mode srcip --hashlimit-upto 54/minute --hashlimit-burst 1 --hashlimit-htable-expire 60000 --hashlimit-htable-size 32768 -m comment --comment \"mtpr_syn_fix\" -j ACCEPT\n\
 -A ufw-before-input -p tcp --dport $port --syn -j REJECT --reject-with tcp-reset" /etc/ufw/before.rules
 
+    # Если COMMIT не найден, добавляем в конец
     if ! grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
         log_info "COMMIT не найден, добавляем в конец before.rules"
         echo -e "\n# MTProxy SYN FIX by MEKO (mtpr_syn_fix)" >> /etc/ufw/before.rules
@@ -199,16 +201,14 @@ show_header() {
     if is_syn_fix_installed; then
         if is_our_syn_fix_installed; then
             local label="Установлен (наш)"
-            local color="${GREEN}"
         else
-            local label="Установлен (иной вариант SYN Limit)"
-            local color="${YELLOW}"
+            local label="Установлен иной вариант SYN Limit)"
         fi
         local port_info=$(get_saved_port)
         if [ -n "$port_info" ]; then
-            echo -e "  ${BOLD}SYN FIX:${NC} ${color}${label}${NC} (порт $port_info)"
+            echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}${label}${NC} (порт $port_info)"
         else
-            echo -e "  ${BOLD}SYN FIX:${NC} ${color}${label}${NC}"
+            echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}${label}${NC}"
         fi
     else
         echo -e "  ${BOLD}SYN FIX:${NC} ${DIM}Не установлен${NC}"
@@ -269,11 +269,10 @@ main_menu() {
                 echo ""
                 if is_syn_fix_installed; then
                     log_info "Обнаружены правила с tcp и syn. Удалить их все?"
-                    echo -en "  ${BOLD}Удалить? [Y/n]:${NC} "
+                    echo -en "  ${BOLD}Удалить? [y/N]:${NC} "
                     local confirm
                     read -r confirm
-                    # Если нажат Enter (пустая строка) или введено y/Y - удаляем
-                    if [[ -z "$confirm" || "$confirm" =~ ^[yY]$ ]]; then
+                    if [[ "$confirm" =~ ^[yY]$ ]]; then
                         remove_syn_fix
                     else
                         log_info "Отмена удаления"
