@@ -1,6 +1,6 @@
 #!/bin/bash
 # Простой менеджер SYN FIX
-# Меню: 1) Remove SYN FIX, 2) Optimization, 0) Exit
+# Меню: 1) Install/Remove SYN FIX, 2) Optimization, 0) Exit
 
 set -eo pipefail
 
@@ -26,29 +26,61 @@ check_root() {
     fi
 }
 
-# ── Проверка, установлен ли SYN FIX ──────────────────────────
-is_syn_fix_installed() {
-    # Ищем наше правило по комментарию
+# ── Проверка, установлен ли НАШ SYN FIX ─────────────────────
+is_our_syn_fix_installed() {
+    # Ищем правило с комментарием "mtpr_syn_fix"
     iptables-save 2>/dev/null | grep -q 'mtpr_syn_fix'
 }
 
-# ── Установка SYN FIX ────────────────────────────────────────
+# ── Удаление чужих SYN-правил на порт 443 ────────────────────
+remove_other_syn_rules() {
+    log_info "Удаление чужих правил SYN-лимита на порт 443..."
+
+    # 1. Удаляем из цепочки ufw-before-input
+    local nums=()
+    while IFS= read -r line; do
+        # Ищем строки с dpt:443 и SYN, не содержащие наш комментарий
+        if echo "$line" | grep -q 'dpt:443' && echo "$line" | grep -q 'SYN' && ! echo "$line" | grep -q 'mtpr_syn_fix'; then
+            num=$(echo "$line" | awk '{print $1}')
+            nums+=("$num")
+        fi
+    done < <(iptables -L ufw-before-input --line-numbers -n 2>/dev/null)
+
+    # Удаляем в обратном порядке (чтобы номера не смещались)
+    for num in $(printf '%s\n' "${nums[@]}" | sort -nr); do
+        iptables -D ufw-before-input "$num" 2>/dev/null && log_info "Удалено правило #$num"
+    done
+
+    # 2. Чистим файл /etc/ufw/before.rules
+    if [ -f /etc/ufw/before.rules ]; then
+        cp /etc/ufw/before.rules /etc/ufw/before.rules.bak.$(date +%s)
+        # Удаляем строки с --dport 443 и --syn, но не содержащие наш комментарий
+        sed -i '/--dport 443.*--syn/ { /mtpr_syn_fix/! d }' /etc/ufw/before.rules
+        log_info "Очищен файл /etc/ufw/before.rules (бэкап создан)"
+    fi
+
+    # Перезагружаем ufw, чтобы применить изменения из файла
+    ufw reload >/dev/null 2>&1 || true
+}
+
+# ── Установка НАШЕГО SYN FIX ────────────────────────────────
 install_syn_fix() {
     log_info "Установка SYN FIX..."
 
-    # Обновляем пакеты и ставим ufw
-    apt update -qq
-    apt install ufw -y -qq
+    # 1. Удаляем все чужие правила
+    remove_other_syn_rules
 
-    # Открываем порты
+    # 2. Убеждаемся, что ufw установлен и включен
+    apt update
+    apt install ufw -y
+
     ufw allow 22/tcp
     ufw allow 443/tcp
 
-    # Включаем ufw (принудительно, без подтверждения)
     ufw --force enable
     ufw reload
 
-    # Правило 1: лимит SYN (54 в минуту с одного IP)
+    # 3. Добавляем наши правила
     iptables -I ufw-before-input 1 \
         -p tcp --dport 443 --syn \
         -m hashlimit \
@@ -61,7 +93,6 @@ install_syn_fix() {
         -m comment --comment "mtpr_syn_fix" \
         -j ACCEPT
 
-    # Правило 2: остальные SYN — сброс
     iptables -I ufw-before-input 2 \
         -p tcp --dport 443 --syn \
         -j REJECT --reject-with tcp-reset
@@ -69,11 +100,11 @@ install_syn_fix() {
     log_success "SYN FIX успешно установлен"
 }
 
-# ── Удаление SYN FIX ─────────────────────────────────────────
+# ── Удаление НАШЕГО SYN FIX ──────────────────────────────────
 remove_syn_fix() {
     log_info "Удаление SYN FIX..."
 
-    # Удаляем правило 1 (по точному совпадению параметров)
+    # Удаляем первое правило (с комментарием)
     iptables -D ufw-before-input \
         -p tcp --dport 443 --syn \
         -m hashlimit \
@@ -86,7 +117,7 @@ remove_syn_fix() {
         -m comment --comment "mtpr_syn_fix" \
         -j ACCEPT 2>/dev/null || true
 
-    # Удаляем правило 2
+    # Удаляем второе правило
     iptables -D ufw-before-input \
         -p tcp --dport 443 --syn \
         -j REJECT --reject-with tcp-reset 2>/dev/null || true
@@ -112,8 +143,8 @@ show_header() {
     echo -e "  ${DIM}===========================${NC}"
     echo ""
     local _status
-    if is_syn_fix_installed; then
-        _status="${GREEN}Установлен${NC}"
+    if is_our_syn_fix_installed; then
+        _status="${GREEN}Установлен (наш)${NC}"
     else
         _status="${DIM}Не установлен${NC}"
     fi
@@ -125,7 +156,15 @@ show_header() {
 main_menu() {
     while true; do
         show_header
-        echo -e "  ${CYAN}[1]${NC}  Remove SYN FIX (установить/удалить)"
+
+        # Динамическое имя пункта 1
+        if is_our_syn_fix_installed; then
+            local item1="${RED}Remove SYN FIX${NC}"
+        else
+            local item1="${GREEN}Install SYN FIX${NC}"
+        fi
+
+        echo -e "  ${CYAN}[1]${NC}  $item1"
         echo -e "  ${CYAN}[2]${NC}  Optimization (пока ничего не делает)"
         echo -e "  ${CYAN}[0]${NC}  Выход"
         echo ""
@@ -136,7 +175,7 @@ main_menu() {
         case "$choice" in
             1)
                 echo ""
-                if is_syn_fix_installed; then
+                if is_our_syn_fix_installed; then
                     log_info "SYN FIX уже установлен. Удалить?"
                     echo -en "  ${BOLD}Удалить? [y/N]:${NC} "
                     local confirm
