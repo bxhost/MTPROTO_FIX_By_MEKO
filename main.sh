@@ -42,18 +42,26 @@ save_port() {
     echo "$1" > "$PORT_FILE"
 }
 
-# ── Удаление всех наших строк из .rules файлов ──────────────
+# ── Удаление наших строк из .rules файлов ─────────────────────
 clean_our_rules_from_files() {
     find /etc/ufw/ -name '*.rules' -type f | while read -r file; do
         if grep -q 'mtpr_syn_fix' "$file"; then
             cp "$file" "$file.bak.$(date +%s)"
-            # Удаляем строки с комментарием и сами правила (содержащие mtpr_syn_fix)
             sed -i '/mtpr_syn_fix/d' "$file"
-            # Также удаляем строку с комментарием (если осталась)
             sed -i '/# MTProxy SYN FIX by MEKO/d' "$file"
-            # Удаляем пустые строки
             sed -i '/^$/d' "$file"
-            log_info "Очищен файл: $file"
+            log_info "Очищен файл (наши правила): $file"
+        fi
+    done
+}
+
+# ── Удаление всех строк, содержащих одновременно tcp и syn (любой SYN FIX) ─
+clean_all_syn_rules_from_files() {
+    find /etc/ufw/ -name '*.rules' -type f | while read -r file; do
+        if grep -qiE 'tcp.*syn|syn.*tcp' "$file"; then
+            cp "$file" "$file.bak.$(date +%s)"
+            sed -i '/tcp.*syn\|syn.*tcp/Id' "$file"
+            log_info "Очищен файл от всех SYN-правил: $file"
         fi
     done
 }
@@ -159,7 +167,7 @@ install_syn_fix() {
 remove_syn_fix() {
     log_info "Удаление всех правил с tcp и syn..."
 
-    # 1. Удаляем из цепочки ufw-before-input в iptables
+    # 1. Удаляем из цепочки ufw-before-input в iptables (на случай, если файлы не синхронизированы)
     local nums=()
     while IFS= read -r line; do
         if echo "$line" | grep -qiE 'tcp.*syn|syn.*tcp'; then
@@ -172,8 +180,8 @@ remove_syn_fix() {
         iptables -D ufw-before-input "$num" 2>/dev/null && log_info "Удалено правило #$num из iptables"
     done
 
-    # 2. Удаляем все наши строки из файлов
-    clean_our_rules_from_files
+    # 2. Удаляем все строки с tcp и syn из ВСЕХ .rules (включая чужие)
+    clean_all_syn_rules_from_files
 
     ufw reload
     rm -f "$PORT_FILE"
@@ -204,7 +212,7 @@ show_header() {
             local label="Установлен (наш)"
             local color="${GREEN}"
         else
-            local label="Установлен иной вариант SYN Limit)"
+            local label="Установлен иной вариант (SYN Limit)"
             local color="${YELLOW}"
         fi
         local port_info=$(get_saved_port)
