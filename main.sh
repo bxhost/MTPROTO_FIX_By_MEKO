@@ -196,13 +196,13 @@ show_header() {
         if is_our_syn_fix_installed; then
             local port_info=$(get_saved_port)
             if [ -n "$port_info" ]; then
-                echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен (MEKO)${NC} (порт $port_info)"
+                echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен (MEKO SYN FIX)${NC} (порт $port_info)"
             else
-                echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен (MEKO)${NC}"
+                echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен (MEKO SYN FIX)${NC}"
             fi
         else
             # Любой другой SYN фикс (не наш)
-            echo -e "  ${BOLD}SYN FIX:${NC} ${YELLOW}Установлен (сторонний)${NC}"
+            echo -e "  ${BOLD}SYN FIX:${NC} ${YELLOW}Установлен (ДРУГОЙ SYN FIX)${NC}"
         fi
     else
         echo -e "  ${BOLD}SYN FIX:${NC} ${RED}Не установлен${NC}"
