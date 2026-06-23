@@ -58,11 +58,14 @@ clean_our_rules_from_files() {
 }
 
 # ── ПРОВЕРКА НАЛИЧИЯ ЛЮБОГО ПРАВИЛА С tcp И syn ────────────
+# Ищем правила, начинающиеся с -A (или -I) и содержащие tcp и syn
 is_syn_fix_installed() {
-    if iptables-save 2>/dev/null | grep -iE 'tcp.*syn|syn.*tcp' | grep -q .; then
+    # Проверяем в iptables
+    if iptables-save 2>/dev/null | grep -E '^-A.*-p tcp.*--syn|^-A.*--syn.*-p tcp' | grep -q .; then
         return 0
     fi
-    if grep -rE 'tcp.*syn|syn.*tcp' /etc/ufw/ --include='*.rules' 2>/dev/null | grep -q .; then
+    # Проверяем во всех .rules файлах в /etc/ufw/
+    if grep -E '^-A.*-p tcp.*--syn|^-A.*--syn.*-p tcp' /etc/ufw/ --include='*.rules' 2>/dev/null | grep -q .; then
         return 0
     fi
     return 1
@@ -161,7 +164,7 @@ remove_syn_fix() {
     # 1. Удаляем из цепочки ufw-before-input в iptables
     local nums=()
     while IFS= read -r line; do
-        if echo "$line" | grep -qiE 'tcp.*syn|syn.*tcp'; then
+        if echo "$line" | grep -E '^-A.*-p tcp.*--syn|^-A.*--syn.*-p tcp' | grep -q .; then
             num=$(echo "$line" | awk '{print $1}')
             nums+=("$num")
         fi
