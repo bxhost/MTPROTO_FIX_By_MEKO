@@ -13,9 +13,9 @@ DIM='\033[2m'
 NC='\033[0m'
 
 # ── Логирование ─────────────────────────────────────────────
-log_info()    { echo -e "  ${BLUE}[i]${NC} $1"; }
+log_info() { echo -e "  ${BLUE}[i]${NC} $1"; }
 log_success() { echo -e "  ${GREEN}[✓]${NC} $1"; }
-log_error()   { echo -e "  ${RED}[✗]${NC} $1" >&2; }
+log_error() { echo -e "  ${RED}[✗]${NC} $1" >&2; }
 log_warning() { echo -e "  ${YELLOW}[!]${NC} $1"; }
 
 # ── Проверка root ────────────────────────────────────────────
@@ -29,6 +29,42 @@ check_root() {
 # ── Файл для хранения порта ─────────────────────────────────
 PORT_FILE="/opt/mtpr-simple/port"
 
+# ── Функция определения порта SSH ────────────────────────────
+get_ssh_port() {
+    local port
+    if command -v sshd >/dev/null 2>&1 && sshd -T 2>/dev/null | grep -q 'port '; then
+        port=$(sshd -T | grep 'port ' | awk '{print $2}' | head -1)
+        if [[ "$port" =~ ^[0-9]+$ ]]; then
+            echo "$port"
+            return 0
+        fi
+    fi
+
+    if [ -f /etc/ssh/sshd_config ]; then
+        port=$(grep -E '^Port[[:space:]]+[0-9]+' /etc/ssh/sshd_config | head -1 | awk '{print $2}')
+        if [[ "$port" =~ ^[0-9]+$ ]]; then
+            echo "$port"
+            return 0
+        fi
+    fi
+
+    if [ -d /etc/ssh/sshd_config.d ]; then
+        for cfg in /etc/ssh/sshd_config.d/*.conf; do
+            if [ -f "$cfg" ]; then
+                port=$(grep -E '^Port[[:space:]]+[0-9]+' "$cfg" | head -1 | awk '{print $2}')
+                if [[ "$port" =~ ^[0-9]+$ ]]; then
+                    echo "$port"
+                    return 0
+                fi
+            fi
+        done
+    fi
+
+    # Дефолтное значение
+    echo "22"
+    return 0
+}
+
 get_saved_port() {
     if [ -f "$PORT_FILE" ]; then
         cat "$PORT_FILE"
@@ -38,7 +74,7 @@ get_saved_port() {
 }
 
 save_port() {
-    echo "$1" > "$PORT_FILE"
+    echo "$1" >"$PORT_FILE"
 }
 
 # ── ПРОВЕРКА НАЛИЧИЯ ЛЮБОГО ПРАВИЛА С tcp И syn ────────────
@@ -108,12 +144,12 @@ disable_mss() {
         log_error "Файл $config не найден"
         return 1
     fi
-    
+
     if ! is_mss_enabled; then
         log_info "MSS уже отключен"
         return 0
     fi
-    
+
     log_info "Отключение MSS в $config..."
     sed -i 's/^[[:space:]]*\(.*mss.*\)/#\1/i' "$config"
     log_success "MSS отключен (строки с mss закомментированы)"
@@ -122,6 +158,7 @@ disable_mss() {
 # ── Установка SYN FIX ──────────────────────────────────────
 install_syn_fix() {
     local port
+    ssh_port=$(get_ssh_port)
     echo ""
     echo -en "  ${BOLD}Введите порт для SYN FIX (по умолчанию 443):${NC} "
     read -r port
@@ -139,19 +176,19 @@ install_syn_fix() {
     echo ""
     echo -e "  ${BOLD}Что будет сделано:${NC}"
     echo -e "  • Установлен пакет ${CYAN}ufw${NC} (если не установлен)"
-    echo -e "  • Разрешены порты ${CYAN}22${NC} (для вашего доступа по SSH) и ${CYAN}$port${NC} (для Telemt)"
+    echo -e "  • Разрешены порты ${CYAN}$ssh_port${NC} (для вашего доступа по SSH) и ${CYAN}$port${NC} (для Telemt)"
     echo -e "  • Включен файрвол ${CYAN}ufw${NC}"
     echo -e "  • Добавлены ${CYAN}4 правила iptables${NC} SYN"
     echo -e "  • Правила будут добавлены в цепочку ${CYAN}ufw-before-input${NC}"
     echo -e "  • Вы сможете удалить данную настройку через меню скрипта."
     echo ""
     log_warning "${BOLD}ВНИМАНИЕ:${NC} Данная настройка изменит файрвол системы."
-    log_warning "Если вы подключены не через SSH на порту 22, вы можете потерять доступ"
+    log_warning "Если вы подключены не через SSH на порту $ssh_port, вы можете потерять доступ"
     echo ""
     echo -en "  ${BOLD}Продолжить установку? [y/N]:${NC} "
     local confirm
     read -r confirm
-    
+
     if [[ ! "$confirm" =~ ^[yY]$ ]]; then
         log_info "Установка отменена"
         sleep 0.5
@@ -162,46 +199,46 @@ install_syn_fix() {
 
     apt update
     apt install ufw -y
-    ufw allow 22/tcp
+    ufw allow "$ssh_port"/tcp
     ufw allow "$port"/tcp
     ufw --force enable
     ufw reload
 
     iptables -I ufw-before-input 1 \
-    -p tcp --dport "$port" --syn \
-    -m tcp --tcp-flags SYN SYN \
-    -m length --length 64 \
-    -m ttl --ttl-lt 65 \
-    -m hashlimit \
-    --hashlimit-name ios_"$port" \
-    --hashlimit-mode srcip \
-    --hashlimit-upto 15/second \
-    --hashlimit-burst 30 \
-    --hashlimit-htable-expire 60000 \
-    --hashlimit-htable-size 32768 \
-    -j ACCEPT
+        -p tcp --dport "$port" --syn \
+        -m tcp --tcp-flags SYN SYN \
+        -m length --length 64 \
+        -m ttl --ttl-lt 65 \
+        -m hashlimit \
+        --hashlimit-name ios_"$port" \
+        --hashlimit-mode srcip \
+        --hashlimit-upto 15/second \
+        --hashlimit-burst 30 \
+        --hashlimit-htable-expire 60000 \
+        --hashlimit-htable-size 32768 \
+        -j ACCEPT
 
     iptables -I ufw-before-input 2 \
-    -p tcp --dport "$port" --syn \
-    -m tcp --tcp-flags SYN SYN \
-    -m length --length 64 \
-    -m ttl --ttl-lt 65 \
-    -j REJECT --reject-with tcp-reset
+        -p tcp --dport "$port" --syn \
+        -m tcp --tcp-flags SYN SYN \
+        -m length --length 64 \
+        -m ttl --ttl-lt 65 \
+        -j REJECT --reject-with tcp-reset
 
     iptables -I ufw-before-input 3 \
-    -p tcp --dport "$port" --syn \
-    -m hashlimit \
-    --hashlimit-name mtproto_"$port" \
-    --hashlimit-mode srcip \
-    --hashlimit-upto 54/minute \
-    --hashlimit-burst 1 \
-    --hashlimit-htable-expire 60000 \
-    --hashlimit-htable-size 32768 \
-    -j ACCEPT
+        -p tcp --dport "$port" --syn \
+        -m hashlimit \
+        --hashlimit-name mtproto_"$port" \
+        --hashlimit-mode srcip \
+        --hashlimit-upto 54/minute \
+        --hashlimit-burst 1 \
+        --hashlimit-htable-expire 60000 \
+        --hashlimit-htable-size 32768 \
+        -j ACCEPT
 
     iptables -I ufw-before-input 4 \
-    -p tcp --dport "$port" --syn \
-    -j REJECT --reject-with tcp-reset
+        -p tcp --dport "$port" --syn \
+        -j REJECT --reject-with tcp-reset
 
     save_port "$port"
 
@@ -267,33 +304,39 @@ apply_optimization() {
 apply_basic_optimization() {
     echo ""
     log_info "Выполнение базовой оптимизации системы и Telemt..."
-    
+
+    if [ ! -f /etc/sysctl.conf ]; then
+        touch /etc/sysctl.conf
+        chmod 644 /etc/sysctl.conf
+        log_info "Создан /etc/sysctl.conf"
+    fi
+
     # Создаем директорию для лимитов
     mkdir -p /etc/systemd/system/telemt.service.d
-    
+
     # Настраиваем лимиты для telemt
     if ! grep -q "LimitNOFILE=65535" /etc/systemd/system/telemt.service.d/limits.conf 2>/dev/null; then
-        cat > /etc/systemd/system/telemt.service.d/limits.conf << EOF
+        cat >/etc/systemd/system/telemt.service.d/limits.conf <<EOF
 [Service]
 LimitNOFILE=65535
 EOF
     fi
-    
+
     systemctl daemon-reload
-    
+
     # Функция применения sysctl
     apply_sysctl() {
         local key="$1"
         local value="$2"
-        
+
         if [ "$(sysctl -n "$key" 2>/dev/null)" != "$value" ]; then
             sysctl -w "$key=$value"
             sed -i "/^${key}=*/d" /etc/sysctl.conf
             sed -i "/^${key} =.*/d" /etc/sysctl.conf
-            echo "$key=$value" >> /etc/sysctl.conf
+            echo "$key=$value" >>/etc/sysctl.conf
         fi
     }
-    
+
     apply_sysctl net.ipv4.tcp_fastopen 3
     apply_sysctl net.core.somaxconn 65535
     apply_sysctl net.ipv4.tcp_max_syn_backlog 65535
@@ -304,11 +347,11 @@ EOF
     apply_sysctl net.ipv4.tcp_keepalive_time 45
     apply_sysctl net.ipv4.tcp_keepalive_intvl 15
     apply_sysctl net.ipv4.tcp_keepalive_probes 3
-    
-    sysctl --system
-    
+
+    sysctl --system 2>/dev/null || log_info "sysctl --system выполнен без изменений"
+
     systemctl stop telemt
-    
+
     # Настройка max_connections
     if grep -q '^max_connections *=.*' /etc/telemt/telemt.toml; then
         if ! grep -q '^max_connections *= *16384' /etc/telemt/telemt.toml; then
@@ -317,17 +360,16 @@ EOF
     else
         grep -q '\[server\]' /etc/telemt/telemt.toml && sed -i '/\[server\]/a max_connections = 16384' /etc/telemt/telemt.toml
     fi
-    
-    
+
     # Настройка client_handshake
     if grep -q '^client_handshake *=.*' /etc/telemt/telemt.toml; then
         if ! grep -q '^client_handshake *= *15' /etc/telemt/telemt.toml; then
             sed -i 's/^client_handshake *= *.*/client_handshake = 15/' /etc/telemt/telemt.toml
         fi
     fi
-    
+
     systemctl restart telemt
-    
+
     log_success "Базовая оптимизация выполнена"
 }
 
@@ -384,7 +426,7 @@ show_header() {
         else
             echo -e "  ${BOLD}Telemt:${NC} ${GREEN}Установлен${NC} (порт не определён)"
         fi
-        
+
         # Статус MSS
         if is_mss_enabled; then
             echo -e "  ${BOLD}MSS:${NC} ${RED}включен${NC}"
@@ -426,51 +468,51 @@ main_menu() {
         read -r choice
 
         case "$choice" in
-            1)
-                echo ""
-                if is_syn_fix_installed; then
-                    log_info "Обнаружены правила с tcp и syn. Удалить их все?"
-                    echo -en "  ${BOLD}Удалить? [Y/n]:${NC} "
-                    local confirm
-                    read -r confirm
-                    if [[ -z "$confirm" || "$confirm" =~ ^[yY]$ ]]; then
-                        remove_syn_fix
-                    else
-                        log_info "Отмена удаления"
-                    fi
+        1)
+            echo ""
+            if is_syn_fix_installed; then
+                log_info "Обнаружены правила с tcp и syn. Удалить их все?"
+                echo -en "  ${BOLD}Удалить? [Y/n]:${NC} "
+                local confirm
+                read -r confirm
+                if [[ -z "$confirm" || "$confirm" =~ ^[yY]$ ]]; then
+                    remove_syn_fix
                 else
-                    if ! install_syn_fix; then
-                        continue
-                    fi
+                    log_info "Отмена удаления"
                 fi
+            else
+                if ! install_syn_fix; then
+                    continue
+                fi
+            fi
+            echo ""
+            read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
+            ;;
+        2)
+            echo ""
+            if is_mss_enabled; then
+                apply_optimization
+            else
+                log_info "MSS уже отключен"
                 echo ""
                 read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
-                ;;
-            2)
-                echo ""
-                if is_mss_enabled; then
-                    apply_optimization
-                else
-                    log_info "MSS уже отключен"
-                    echo ""
-                    read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
-                fi
-                ;;
-            3)
-                echo ""
-                apply_basic_optimization
-                echo ""
-                read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
-                ;;
-            0|q|Q)
-                echo ""
-                log_info "Выход"
-                exit 0
-                ;;
-            *)
-                log_error "Неверный выбор"
-                sleep 1
-                ;;
+            fi
+            ;;
+        3)
+            echo ""
+            apply_basic_optimization
+            echo ""
+            read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
+            ;;
+        0 | q | Q)
+            echo ""
+            log_info "Выход"
+            exit 0
+            ;;
+        *)
+            log_error "Неверный выбор"
+            sleep 1
+            ;;
         esac
     done
 }
