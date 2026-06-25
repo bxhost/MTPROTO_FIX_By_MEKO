@@ -238,6 +238,82 @@ apply_optimization() {
     fi
 }
 
+# ── Пункт 3: Базовая оптимизация ───────────────────────────
+apply_basic_optimization() {
+    echo ""
+    log_info "Выполнение базовой оптимизации системы и Telemt..."
+    
+    # Создаем директорию для лимитов
+    mkdir -p /etc/systemd/system/telemt.service.d
+    
+    # Настраиваем лимиты для telemt
+    if ! grep -q "LimitNOFILE=65535" /etc/systemd/system/telemt.service.d/limits.conf 2>/dev/null; then
+        cat > /etc/systemd/system/telemt.service.d/limits.conf << EOF
+[Service]
+LimitNOFILE=65535
+EOF
+    fi
+    
+    systemctl daemon-reload
+    
+    # Функция применения sysctl
+    apply_sysctl() {
+        local key="$1"
+        local value="$2"
+        
+        if [ "$(sysctl -n "$key" 2>/dev/null)" != "$value" ]; then
+            sysctl -w "$key=$value"
+            sed -i "/^${key}=*/d" /etc/sysctl.conf
+            sed -i "/^${key} =.*/d" /etc/sysctl.conf
+            echo "$key=$value" >> /etc/sysctl.conf
+        fi
+    }
+    
+    apply_sysctl net.ipv4.tcp_fastopen 3
+    apply_sysctl net.core.somaxconn 65535
+    apply_sysctl net.ipv4.tcp_max_syn_backlog 65535
+    apply_sysctl net.core.netdev_max_backlog 65535
+    apply_sysctl fs.file-max 2097152
+    apply_sysctl net.core.default_qdisc fq
+    apply_sysctl net.ipv4.tcp_congestion_control bbr
+    apply_sysctl net.ipv4.tcp_keepalive_time 45
+    apply_sysctl net.ipv4.tcp_keepalive_intvl 15
+    apply_sysctl net.ipv4.tcp_keepalive_probes 3
+    
+    sysctl --system
+    
+    systemctl stop telemt
+    
+    # Настройка max_connections
+    if grep -q '^max_connections *=.*' /etc/telemt/telemt.toml; then
+        if ! grep -q '^max_connections *= *16384' /etc/telemt/telemt.toml; then
+            sed -i 's/^max_connections *= *.*/max_connections = 16384/' /etc/telemt/telemt.toml
+        fi
+    else
+        grep -q '\[server\]' /etc/telemt/telemt.toml && sed -i '/\[server\]/a max_connections = 16384' /etc/telemt/telemt.toml
+    fi
+    
+    # Настройка idle_timeout_sec
+    if grep -q '^idle_timeout_sec *=.*' /etc/telemt/telemt.toml; then
+        if ! grep -q '^idle_timeout_sec *= *300' /etc/telemt/telemt.toml; then
+            sed -i 's/^idle_timeout_sec *= *.*/idle_timeout_sec = 300/' /etc/telemt/telemt.toml
+        fi
+    else
+        grep -q '\[server\]' /etc/telemt/telemt.toml && sed -i '/\[server\]/a idle_timeout_sec = 300' /etc/telemt/telemt.toml
+    fi
+    
+    # Настройка client_handshake
+    if grep -q '^client_handshake *=.*' /etc/telemt/telemt.toml; then
+        if ! grep -q '^client_handshake *= *15' /etc/telemt/telemt.toml; then
+            sed -i 's/^client_handshake *= *.*/client_handshake = 15/' /etc/telemt/telemt.toml
+        fi
+    fi
+    
+    systemctl restart telemt
+    
+    log_success "Базовая оптимизация выполнена"
+}
+
 # ── Очистка экрана и шапка ──────────────────────────────────
 clear_screen() {
     clear 2>/dev/null || printf '\033[2J\033[H'
@@ -246,7 +322,7 @@ clear_screen() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.1${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.2${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
@@ -325,6 +401,7 @@ main_menu() {
 
         echo -e "  ${CYAN}[1]${NC}  $item1"
         echo -e "  ${CYAN}[2]${NC}  $item2"
+        echo -e "  ${CYAN}[3]${NC}  ${GREEN}Выполнить базовую оптимизацию${NC}"
         echo -e "  ${CYAN}[0]${NC}  Выход"
         echo ""
         echo -en "  ${BOLD}Выбор:${NC} "
@@ -359,6 +436,12 @@ main_menu() {
                     echo ""
                     read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
                 fi
+                ;;
+            3)
+                echo ""
+                apply_basic_optimization
+                echo ""
+                read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
                 ;;
             0|q|Q)
                 echo ""
