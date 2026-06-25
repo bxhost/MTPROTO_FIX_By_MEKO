@@ -51,7 +51,7 @@ is_syn_fix_installed() {
     return 1
 }
 
-# ── ПРОВЕРКА, ЧТО СТОИТ ИМЕННО НАШ SYN FIX (mtpr_syn_fix) ──
+# ── ПРОВЕРКА ──
 is_our_syn_fix_installed() {
     if iptables-save 2>/dev/null | grep -q 'mtpr_syn_fix'; then
         return 0
