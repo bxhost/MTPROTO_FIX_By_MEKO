@@ -153,6 +153,7 @@ install_syn_fix() {
     
     if [[ ! "$confirm" =~ ^[yY]$ ]]; then
         log_info "Установка отменена"
+        sleep 0.5
         return 1
     fi
 
@@ -345,7 +346,7 @@ clear_screen() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.5${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.6${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
