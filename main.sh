@@ -136,7 +136,7 @@ install_syn_fix() {
 
     apt update
     apt install ufw -y
-
+    ufw allow 22/tcp
     ufw allow "$port"/tcp
     ufw --force enable
     ufw reload
