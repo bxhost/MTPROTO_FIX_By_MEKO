@@ -333,7 +333,7 @@ EOF
 
     # Функция применения sysctl
     apply_sysctl() {
-        cat >/etc/sysctl.d/99-custom.conf <<EOF
+		cat > /etc/sysctl.d/99-custom.conf << EOF
 net.ipv4.tcp_fastopen=3
 net.core.somaxconn=65535
 net.ipv4.tcp_max_syn_backlog=65535
@@ -346,12 +346,9 @@ net.ipv4.tcp_keepalive_intvl=15
 net.ipv4.tcp_keepalive_probes=3
 EOF
 
-        sysctl --system 2>/dev/null || log_info "sysctl --system выполнен без изменений"
+		sysctl --system
     }
-
-    apply_sysctl
-    log_success "Параметры sysctl применены (BBR, fastopen, лимиты соединений)"
-
+    
     systemctl stop telemt
 
     # Настройка max_connections
