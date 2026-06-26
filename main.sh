@@ -333,7 +333,7 @@ EOF
 
     # Функция применения sysctl
     apply_sysctl() {
-		cat > /etc/sysctl.d/99-custom.conf << EOF
+        cat > /etc/sysctl.d/99-custom.conf << EOF
 net.ipv4.tcp_fastopen=3
 net.core.somaxconn=65535
 net.ipv4.tcp_max_syn_backlog=65535
@@ -346,9 +346,12 @@ net.ipv4.tcp_keepalive_intvl=15
 net.ipv4.tcp_keepalive_probes=3
 EOF
 
-		sysctl --system
+        sysctl --system
     }
-    
+
+    # ★★★★★ ВЫЗЫВАЕМ ФУНКЦИЮ ★★★★★
+    apply_sysctl
+
     systemctl stop telemt
 
     # Настройка max_connections
@@ -380,7 +383,7 @@ clear_screen() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.7${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.71${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
