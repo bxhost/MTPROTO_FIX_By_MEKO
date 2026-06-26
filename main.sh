@@ -1,5 +1,13 @@
 #!/bin/bash
 set -eo pipefail
+DEFAULT_CONFIG_TELEMT="/etc/telemt/config.toml"
+
+echo -en "Укажите путь к конфигу Telemt [${DEFAULT_CONFIG_TELEMT}]: "
+read -r CONFIG_TELEMT
+
+if [ -z "$CONFIG_TELEMT" ]; then
+    CONFIG_TELEMT="$DEFAULT_CONFIG_TELEMT"
+fi
 
 # ── Цвета ─────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -93,13 +101,7 @@ is_our_syn_fix_installed() {
 # ── Определение Telemt ──────────────────────────────────────
 detect_telemt() {
     if pgrep -x telemt >/dev/null 2>&1; then
-        local configs=(
-            "/etc/telemt/telemt.toml"
-            "/etc/telemt/config.toml"
-            "/etc/telemt.toml"
-            "/opt/telemt/config.toml"
-            "/opt/telemt/telemt.toml"
-        )
+        local configs=$CONFIG_TELEMT
         for cfg in "${configs[@]}"; do
             if [ -f "$cfg" ]; then
                 local port=$(grep -E '^port[[:space:]]*=' "$cfg" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
@@ -119,7 +121,7 @@ detect_telemt() {
 
 # ── ПРОВЕРКА НАЛИЧИЯ MSS В КОНФИГЕ TELEMT ──────────────────
 is_mss_enabled() {
-    local config="/etc/telemt/telemt.toml"
+    local config==$CONFIG_TELEMT
     if [ -f "$config" ]; then
         if grep -qi 'mss' "$config" | grep -v '^#' | grep -q .; then
             return 0
@@ -130,7 +132,7 @@ is_mss_enabled() {
 
 # ── ОТКЛЮЧЕНИЕ MSS (закомментирование строк с mss) ────────
 disable_mss() {
-    local config="/etc/telemt/telemt.toml"
+    local config=$CONFIG_TELEMT
     if [ ! -f "$config" ]; then
         log_error "Файл $config не найден"
         return 1
@@ -290,7 +292,7 @@ remove_syn_fix() {
 apply_optimization() {
     if is_mss_enabled; then
         echo ""
-        log_info "Обнаружены активные строки с MSS в /etc/telemt/telemt.toml"
+        log_info "Обнаружены активные строки с MSS в $CONFIG_TELEMT"
         echo -en "  ${BOLD}Отключить MSS? [Y/n]:${NC} "
         local confirm
         read -r confirm
@@ -355,18 +357,18 @@ EOF
     systemctl stop telemt
 
     # Настройка max_connections
-    if grep -q '^max_connections *=.*' /etc/telemt/telemt.toml; then
-        if ! grep -q '^max_connections *= *16384' /etc/telemt/telemt.toml; then
-            sed -i 's/^max_connections *= *.*/max_connections = 16384/' /etc/telemt/telemt.toml
+    if grep -q '^max_connections *=.*' $CONFIG_TELEMT; then
+        if ! grep -q '^max_connections *= *16384' $CONFIG_TELEMT; then
+            sed -i 's/^max_connections *= *.*/max_connections = 16384/' $CONFIG_TELEMT
         fi
     else
-        grep -q '\[server\]' /etc/telemt/telemt.toml && sed -i '/\[server\]/a max_connections = 16384' /etc/telemt/telemt.toml
+        grep -q '\[server\]' $CONFIG_TELEMT && sed -i '/\[server\]/a max_connections = 16384' $CONFIG_TELEMT
     fi
 
     # Настройка client_handshake
-    if grep -q '^client_handshake *=.*' /etc/telemt/telemt.toml; then
-        if ! grep -q '^client_handshake *= *15' /etc/telemt/telemt.toml; then
-            sed -i 's/^client_handshake *= *.*/client_handshake = 15/' /etc/telemt/telemt.toml
+    if grep -q '^client_handshake *=.*' $CONFIG_TELEMT; then
+        if ! grep -q '^client_handshake *= *15' $CONFIG_TELEMT; then
+            sed -i 's/^client_handshake *= *.*/client_handshake = 15/' $CONFIG_TELEMT
         fi
     fi
 
@@ -407,13 +409,7 @@ show_header() {
     # Telemt
     if pgrep -x telemt >/dev/null 2>&1; then
         local port_info=""
-        local configs=(
-            "/etc/telemt/telemt.toml"
-            "/etc/telemt/config.toml"
-            "/etc/telemt.toml"
-            "/opt/telemt/config.toml"
-            "/opt/telemt/telemt.toml"
-        )
+        local configs=$CONFIG_TELEMT
         for cfg in "${configs[@]}"; do
             if [ -f "$cfg" ]; then
                 local port=$(grep -E '^port[[:space:]]*=' "$cfg" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
