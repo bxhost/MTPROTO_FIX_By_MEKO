@@ -42,8 +42,8 @@ mekopr
 
 💰 **Криптовалюта:**  
 
-[![Поддержать проект](<img width="300" height="300" alt="image" src="https://github.com/user-attachments/assets/b910c839-ec45-486d-b7f0-05da8de41b74" />
-)](https://t.me/send?start=IVlaFvgWdkxH)
+[<img width="300" height="300" alt="image" src="https://github.com/user-attachments/assets/b910c839-ec45-486d-b7f0-05da8de41b74" />
+](https://t.me/send?start=IVlaFvgWdkxH)
 
 от **0.1 USDT**
 
